@@ -2,6 +2,21 @@ import { parse } from 'csv-parse';
 import fs from 'fs';
 import moment from 'moment';
 import readlineSync from 'readline-sync';
+import log4js from 'log4js';
+
+
+log4js.configure({
+    appenders: {
+        program: { type: 'fileSync', filename: 'logs/debug.log' }
+    },
+    categories: {
+        default: { appenders: ['program'], level: 'debug'}
+    }
+});
+
+const logger = log4js.getLogger()
+logger.level = "debug";
+
 
 let transactions = [];
 let accounts = [];
@@ -64,28 +79,65 @@ function listAccount (person) {
     }
 }
 
-function readTransactions (transactionFile) {
-    fs.createReadStream(transactionFile)
-        .pipe(parse({columns:true}))
-        .on('data', (data) => {
-            if (!checkAccountExists(data.From)){
-                accounts.push(new Account(data.From, 0))
-            }
-            if (!checkAccountExists(data.To)){
-                accounts.push(new Account(data.To, 0))
-            }
-            transactions.push(new Transaction(moment(data.Date,  "DD/MM/YYYY"), accounts.find(o => o.owner === data.From), accounts.find(o => o.owner === data.To), data.Narrative, parseFloat(data.Amount)))
+async function readTransactions(files) {
+    for (let i in files) {
+        await parseTransactions(files[i])
+        logger.debug("Finished import from " + files[i])
+    }
+}
 
+async function parseTransactions (file){
+    logger.debug("Importing transactions from " + file)
+    return new Promise(function (resolve, reject) {
+        let line = 1;
+        fs.createReadStream(file)
+            .pipe(parse({columns: true}))
+            .on('data', (data) => {
+                line++;
+                if (validateTransactionData(data) === true) {
+                    transactions.push(new Transaction(moment(data.Date, "DD/MM/YYYY"), accounts.find(o => o.owner === data.From), accounts.find(o => o.owner === data.To), data.Narrative, parseFloat(data.Amount)))
+                } else {
+                    console.log("An error occured when importing transactions:")
+                    let exceptionList = validateTransactionData(data)[1]
+                    for (let j in exceptionList) {
+                        console.log(file + " - Line " + line + ": " + exceptionList[j]+'\n')
+                        logger.error("Error found in " + file + " - Line " + line + ": " + exceptionList[j])
+                    }
 
-        })
-        .on('end', () => {
-            consoleInterface();
-        })
+                }
+            })
+            .on('error', (e) => {
+                console.log("An error occurred when importing transactions: " + e)
+                logger.error("Error in parsing transactions - " + e)
+                reject()
+            })
+            .on('end', () => {
+                resolve()
+            })
 
+    })
+}
+
+function validateTransactionData (transaction) {
+    let errors = []
+    checkAccountExists(transaction.From)
+    checkAccountExists(transaction.To)
+
+    if (!moment(transaction.Date, "DD/MM/YYYY").isValid()){
+        errors.push("Invalid date entered.")
+    }
+
+    if (isNaN(parseFloat(transaction.Amount))){
+        errors.push("Invalid amount entered.")
+    }
+    return errors.length == 0 ?  true : [false, errors]
 }
 
 function checkAccountExists (person) {
-    return accounts.find(o => o.owner === person)
+    if (!accounts.find(o => o.owner === person)){
+        accounts.push(new Account(person, 0))
+        logger.debug("New account created - " + person)
+    }
 }
 
 function consoleInterface () {
@@ -104,5 +156,5 @@ function consoleInterface () {
         consoleInterface();
     }
 }
-
-readTransactions('Transactions2014.csv');
+logger.debug("Program started.");
+readTransactions(['Transactions2014.csv','DodgyTransactions2015.csv']).then(r => consoleInterface());
