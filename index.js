@@ -3,7 +3,10 @@ import fs from 'fs';
 import moment from 'moment';
 import readlineSync from 'readline-sync';
 import log4js from 'log4js';
-
+import * as path from "path";
+import Account from './Account.js';
+import Transaction from './Transaction.js';
+import Bank from './Bank.js';
 
 log4js.configure({
     appenders: {
@@ -18,66 +21,7 @@ const logger = log4js.getLogger()
 logger.level = "debug";
 
 
-let transactions = [];
-let accounts = [];
-
-
-class Account {
-    constructor (owner, balance) {
-        this.owner = owner;
-        this.balance = balance;
-        this.transactions = [];
-    }
-
-    adjustBalance (adjustment) {
-        this.balance = this.balance + parseFloat(adjustment);
-        this.balance= parseFloat(this.balance).toFixed(2)
-    }
-
-    addTransaction (transaction, amount){
-        this.transactions.push(transaction);
-        this.adjustBalance(amount);
-    }
-}
-
-class Transaction {
-    constructor (date, accountFrom, accountTo, narrative, amount) {
-        this.date = date;
-        this.accountFrom = accountFrom;
-        this.accountTo = accountTo;
-        this.narrative = narrative;
-        this.amount = amount;
-        accountFrom.addTransaction(this, this.amount * -1)
-        accountTo.addTransaction(this, this.amount)
-    }
-
-}
-
-function listAll () {
-    for (let i in accounts){
-        console.log("Owner: " + accounts[i].owner)
-        console.log("Balance: " + accounts[i].balance)
-        console.log("")
-    }
-}
-
-function listAccount (person) {
-    if (accounts.find(o => o.owner === person)){
-        let foundAccount = accounts.find(o => o.owner === person)
-        console.log(foundAccount.owner)
-        for (let i in foundAccount.transactions){
-            let transaction = foundAccount.transactions[i]
-            console.log("Date: " + moment(transaction.date).format("DD/MM/YYYY"))
-            console.log("From: " + transaction.accountFrom.owner)
-            console.log("To: " + transaction.accountTo.owner)
-            console.log("Narrative: " + transaction.narrative)
-            console.log("Amount: £" + transaction.amount)
-            console.log("")
-        }
-    } else {
-        console.log("Account not found.")
-    }
-}
+let bank = new Bank();
 
 async function readTransactions(files) {
     for (let i in files) {
@@ -95,15 +39,9 @@ async function parseTransactions (file){
             .on('data', (data) => {
                 line++;
                 if (validateTransactionData(data) === true) {
-                    transactions.push(new Transaction(moment(data.Date, "DD/MM/YYYY"), accounts.find(o => o.owner === data.From), accounts.find(o => o.owner === data.To), data.Narrative, parseFloat(data.Amount)))
+                    createTransaction(data)
                 } else {
-                    console.log("An error occured when importing transactions:")
-                    let exceptionList = validateTransactionData(data)[1]
-                    for (let j in exceptionList) {
-                        console.log(file + " - Line " + line + ": " + exceptionList[j]+'\n')
-                        logger.error("Error found in " + file + " - Line " + line + ": " + exceptionList[j])
-                    }
-
+                    reportTransactionImportError(data, line, file)
                 }
             })
             .on('error', (e) => {
@@ -130,24 +68,66 @@ function validateTransactionData (transaction) {
     if (isNaN(parseFloat(transaction.Amount))){
         errors.push("Invalid amount entered.")
     }
-    return errors.length == 0 ?  true : [false, errors]
+    return errors.length === 0 ?  true : [false, errors]
 }
 
 function checkAccountExists (person) {
-    if (!accounts.find(o => o.owner === person)){
-        accounts.push(new Account(person, 0))
+    if (!bank.getAccount(person)){
+        bank.addAccount(new Account(person, 0))
         logger.debug("New account created - " + person)
     }
 }
 
+function createTransaction (data) {
+    let date = moment(data.Date, "DD/MM/YYYY")
+    let accountFrom = bank.getAccount(data.From)
+    let accountTo = bank.getAccount(data.To)
+    bank.addTransaction(new Transaction(date, accountFrom, accountTo, data.Narrative, parseFloat(data.Amount)))
+}
+
+function reportTransactionImportError (data, line, file) {
+    console.log("An error occurred when importing transactions:")
+    let exceptionList = validateTransactionData(data)[1]
+    for (let j in exceptionList) {
+        console.log(file + " - Line " + line + ": " + exceptionList[j]+'\n')
+        logger.error("Error found in " + file + " - Line " + line + ": " + exceptionList[j])
+    }
+
+}
+
+async function importFile(file) {
+    let extension = path.extname(file).slice(1)
+    if (fs.existsSync(file)) {
+        if (extension === 'json') {
+            console.log("WIP")
+        } else if (extension === 'csv') {
+            await parseTransactions(file)
+        } else {
+            console.log("Invalid file type.")
+            logger.error("User inputted file was invalid type - " + file)
+        }
+    } else {
+        console.log("File not found.")
+        logger.error("User inputted file not found - " + file)
+    }
+}
+
 function consoleInterface () {
-    let response = readlineSync.question('Please enter 1 to list all accounts, 2 to look at a specific account, or q to quit. ').toString();
+    let response = readlineSync.question('1 - List all accounts \n' +
+                                                '2 - View a specific account \n' +
+                                                '3 - Import transactions from file \n' +
+                                                'q - Quit. \n').toString();
     if (response === '1'){
-        listAll()
+        bank.listAll()
         consoleInterface()
     } else if (response === '2'){
         let person = readlineSync.question('Please enter the name of the account. ').toString();
-        listAccount(person);
+        bank.listAccount(person);
+        consoleInterface()
+    } else if (response === '3') {
+        let file = readlineSync.question('Please enter the name of the file. ').toString();
+        importFile(file).then(() =>  console.log("File imported successfully.\n"));
+        logger.debug("Transaction file "+file+" imported successfully.")
         consoleInterface()
     } else if (response.toLowerCase() === 'q') {
         process.exit();
@@ -156,5 +136,6 @@ function consoleInterface () {
         consoleInterface();
     }
 }
+
 logger.debug("Program started.");
-readTransactions(['Transactions2014.csv','DodgyTransactions2015.csv']).then(r => consoleInterface());
+readTransactions(['Transactions2014.csv','DodgyTransactions2015.csv']).then(() => consoleInterface());
