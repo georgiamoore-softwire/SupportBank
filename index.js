@@ -1,29 +1,17 @@
 import { parse } from 'csv-parse';
 import fs from 'fs';
+import moment from 'moment';
+import readlineSync from 'readline-sync';
 
 let transactions = [];
-// let people = [];
 let accounts = [];
 
-
-readTransactions('Transactions2014.csv');
-
-// class Person {
-//     constructor (personName, account) {
-//         this.personName = personName;
-//         this.account = account;
-//     }
-// }
 
 class Account {
     constructor (owner, balance) {
         this.owner = owner;
         this.balance = balance;
         this.transactions = [];
-    }
-
-    getBalance () {
-        return this.balance;
     }
 
     adjustBalance (adjustment) {
@@ -51,11 +39,29 @@ class Transaction {
 }
 
 function listAll () {
-
+    for (let i in accounts){
+        console.log("Owner: " + accounts[i].owner)
+        console.log("Balance: " + accounts[i].balance)
+        console.log("")
+    }
 }
 
-function listAccount (account) {
-
+function listAccount (person) {
+    if (accounts.find(o => o.owner === person)){
+        let foundAccount = accounts.find(o => o.owner === person)
+        console.log(foundAccount.owner)
+        for (let i in foundAccount.transactions){
+            let transaction = foundAccount.transactions[i]
+            console.log("Date: " + moment(transaction.date).format("DD/MM/YYYY"))
+            console.log("From: " + transaction.accountFrom.owner)
+            console.log("To: " + transaction.accountTo.owner)
+            console.log("Narrative: " + transaction.narrative)
+            console.log("Amount: £" + transaction.amount)
+            console.log("")
+        }
+    } else {
+        console.log("Account not found.")
+    }
 }
 
 function readTransactions (transactionFile) {
@@ -68,17 +74,35 @@ function readTransactions (transactionFile) {
             if (!checkAccountExists(data.To)){
                 accounts.push(new Account(data.To, 0))
             }
-            transactions.push(new Transaction(data.Date, accounts.find(o => o.owner === data.From), accounts.find(o => o.owner === data.To), data.Narrative, data.Amount))
+            transactions.push(new Transaction(moment(data.Date,  "DD/MM/YYYY"), accounts.find(o => o.owner === data.From), accounts.find(o => o.owner === data.To), data.Narrative, parseFloat(data.Amount)))
 
 
         })
         .on('end', () => {
-            console.log(transactions)
-            console.log(accounts)
+            consoleInterface();
         })
 
 }
 
-function checkAccountExists(person){
+function checkAccountExists (person) {
     return accounts.find(o => o.owner === person)
 }
+
+function consoleInterface () {
+    let response = readlineSync.question('Please enter 1 to list all accounts, 2 to look at a specific account, or q to quit. ').toString();
+    if (response === '1'){
+        listAll()
+        consoleInterface()
+    } else if (response === '2'){
+        let person = readlineSync.question('Please enter the name of the account. ').toString();
+        listAccount(person);
+        consoleInterface()
+    } else if (response.toLowerCase() === 'q') {
+        process.exit();
+    } else {
+        console.log("Please enter a valid response.");
+        consoleInterface();
+    }
+}
+
+readTransactions('Transactions2014.csv');
