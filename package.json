@@ -12,5 +12,6 @@
     "csv-parse": "^5.2.0",
     "moment": "^2.29.3",
     "readline-sync": "^1.4.10"
-  }
+  },
+  "type" : "module"
 }
