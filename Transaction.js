@@ -1,3 +1,5 @@
+import moment from "moment";
+
 export default class Transaction {
     constructor (date, accountFrom, accountTo, narrative, amount) {
         this.date = date;
@@ -8,4 +10,6 @@ export default class Transaction {
         accountFrom.addTransaction(this)
         accountTo.addTransaction(this)
     }
+
+
 }

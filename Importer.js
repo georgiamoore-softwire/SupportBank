@@ -7,6 +7,7 @@ import Account from "./Account.js";
 import Transaction from "./Transaction.js";
 import path from "path";
 import JSONStream from "JSONStream";
+import xml2js from "xml2js";
 
 let _self;
 export default class Importer {
@@ -24,20 +25,13 @@ export default class Importer {
         }
     }
 
-    createTransaction(data) {
-        let date = moment(data.Date, "DD/MM/YYYY")
-        let accountFrom = this.bank.getAccount(this.determineAccountNameSyntax(data, "From"))
-        let accountTo = this.bank.getAccount(this.determineAccountNameSyntax(data, "To"))
-        this.bank.addTransaction(new Transaction(date, accountFrom, accountTo, data.Narrative, parseFloat(data.Amount)))
-
-    }
-
-    reportTransactionImportError (data, line, file) {
-        console.log("An error occurred when importing transactions:")
-        let exceptionList = _self.validateTransactionData(data)[1]
-        for (let j in exceptionList) {
-            console.log(file + " - Line " + line + ": " + exceptionList[j]+'\n')
-            this.logger.error("Error found in " + file + " - Line " + line + ": " + exceptionList[j])
+    standardiseTransactionDataFormat (date, from, to, amount, narrative){
+        return {
+            Date: date,
+            From: from,
+            To: to,
+            Amount: amount,
+            Narrative: narrative
         }
     }
 
@@ -51,20 +45,101 @@ export default class Importer {
             this.logger.error("Error importing from " + file +": "+ e)
         }
     }
-    parseCSVData(stream){
-        return stream.pipe(parse({columns: true}))
+
+    parseCSVData(stream, file){
+        return this.readDataStream(stream.pipe(parse({columns: true})), file)
     }
-    parseJSONData(stream){
-        return stream.pipe(JSONStream.parse('*'))
+
+    parseJSONData(stream, file){
+        return this.readDataStream(stream.pipe(JSONStream.parse('*')), file)
+    }
+
+    parseXMLData(stream, file){
+        let line = 1;
+        return stream.on('data', (data) => {
+            let parser = new xml2js.Parser();
+            parser.parseString(data, function (err, result) {
+                let transactions = result.TransactionList.SupportTransaction
+                for (let i in transactions){
+
+                    let date = moment((transactions[i].$.Date- (25567 +2))*86400*1000) // formula for date conversion https://gist.github.com/christopherscott/2782634
+                    let from =  transactions[i].Parties[0].From[0]
+                    let to = transactions[i].Parties[0].To[0]
+                    let amount =  transactions[i].Value[0]
+                    let narrative =  transactions[i].Description[0]
+
+                    let newTransaction = _self.standardiseTransactionDataFormat(date, from, to, amount, narrative)
+
+                    line++;
+                    _self.createTransaction(newTransaction, line, file)
+                }
+            });
+        })
+    }
+
+    createTransaction(data, line, file) {
+        if (this.validateTransactionData(data) === true) {
+            let date = moment(data.Date, "DD/MM/YYYY")
+            let accountFrom = this.bank.getAccount(data.From)
+            let accountTo = this.bank.getAccount(data.To)
+            this.bank.addTransaction(new Transaction(date, accountFrom, accountTo, data.Narrative, parseFloat(data.Amount)))
+
+        } else {
+            this.reportTransactionImportError(data, line, file)
+        }
+    }
+
+    validateTransactionData(transaction) {
+        let errors = []
+
+        this.createAccountIfNotExisting(transaction.From)
+        this.createAccountIfNotExisting(transaction.To)
+
+        if (!moment(transaction.Date).isValid()){
+            errors.push("Invalid date entered.")
+        }
+
+        if (isNaN(parseFloat(transaction.Amount))){
+            errors.push("Invalid amount entered.")
+        }
+        return errors.length === 0 ?  true : [false, errors]
+    }
+
+
+    reportTransactionImportError (data, line, file) {
+        console.log("An error occurred when importing transactions:")
+        let exceptionList = _self.validateTransactionData(data)[1]
+        for (let j in exceptionList) {
+            console.log(file + " - Line " + line + ": " + exceptionList[j]+'\n')
+            this.logger.error("Error found in " + file + " - Line " + line + ": " + exceptionList[j])
+        }
+    }
+    readDataStream (stream, file) {
+        let line = 1;
+        return stream.on('data', (data) => {
+            let date = moment(data.Date,  ["DD/MM/YYYY","YYYY/MM/DD"])
+            let from = this.determineAccountNameSyntax(data, "From")
+            let to = this.determineAccountNameSyntax(data, "To")
+            let amount =  data.Amount
+            let narrative =  data.Narrative
+            let newTransaction = this.standardiseTransactionDataFormat(date, from, to, amount, narrative)
+
+            line++;
+            this.createTransaction(newTransaction, line, file)
+
+        })
     }
 
     determineFileParser(file, stream){
         let extension = path.extname(file).slice(1)
         if (extension === 'json') {
-            return this.parseJSONData(stream)
+            return this.parseJSONData(stream, file)
         } else if (extension === 'csv') {
-            return this.parseCSVData(stream)
-        } else {
+            return this.parseCSVData(stream, file)
+        } else if (extension === 'xml') {
+            return this.parseXMLData(stream, file)
+        }
+        else {
             console.log("Invalid file type.")
             this.logger.error("User inputted file was invalid type - " + files[i])
         }
@@ -72,19 +147,12 @@ export default class Importer {
     async parseTransactions (file) {
         _self.logger.debug("Importing transactions from " + file)
         return new Promise(function (resolve, reject) {
-            let line = 1;
+
             let stream = fs.createReadStream(file)
                 stream = _self.determineFileParser(file, stream)
 
-                stream.on('data', (data) => {
-                    line++;
-                    if (_self.validateTransactionData(data) === true) {
-                        _self.createTransaction(data)
-                    } else {
-                        _self.reportTransactionImportError(data, line, file)
-                    }
-                })
-                .on('error', (e) => {
+
+                stream.on('error', (e) => {
                     console.log("An error occurred when importing transactions: " + e)
                     _self.logger.error("Error in parsing transactions - " + e)
                     reject()
@@ -103,21 +171,6 @@ export default class Importer {
         }
     }
 
-    validateTransactionData(transaction) {
-        let errors = []
-
-        this.createAccountIfNotExisting(this.determineAccountNameSyntax(transaction, "From"))
-        this.createAccountIfNotExisting(this.determineAccountNameSyntax(transaction, "To"))
-
-        if (!moment(transaction.Date).isValid()){
-            errors.push("Invalid date entered.")
-        }
-
-        if (isNaN(parseFloat(transaction.Amount))){
-            errors.push("Invalid amount entered.")
-        }
-        return errors.length === 0 ?  true : [false, errors]
-    }
 
     async importFiles(files) {
         for (let i in files) {

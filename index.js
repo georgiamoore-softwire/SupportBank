@@ -47,4 +47,4 @@ function consoleInterface () {
 }
 
 logger.debug("Program started.");
-importer.importFiles(['Transactions2013.json']).then(() => consoleInterface());
+importer.importFiles(['Transactions2012.xml', 'Transactions2013.json']).then(() => consoleInterface());
