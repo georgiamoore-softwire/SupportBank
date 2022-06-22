@@ -15,10 +15,8 @@ log4js.configure({
 const logger = log4js.getLogger()
 logger.level = "debug";
 
-
-let bank = new Bank();
+let bank = new Bank(logger);
 let importer = new Importer(logger, bank);
-
 
 function consoleInterface () {
     let response = readlineSync.question('1 - List all accounts \n' +
