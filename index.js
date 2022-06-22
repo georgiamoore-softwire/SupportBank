@@ -58,8 +58,8 @@ async function parseTransactions (file){
 
 function validateTransactionData (transaction) {
     let errors = []
-    checkAccountExists(transaction.From)
-    checkAccountExists(transaction.To)
+    createAccountIfNotExisting(transaction.From)
+    createAccountIfNotExisting(transaction.To)
 
     if (!moment(transaction.Date, "DD/MM/YYYY").isValid()){
         errors.push("Invalid date entered.")
@@ -71,7 +71,7 @@ function validateTransactionData (transaction) {
     return errors.length === 0 ?  true : [false, errors]
 }
 
-function checkAccountExists (person) {
+function createAccountIfNotExisting (person) {
     if (!bank.getAccount(person)){
         bank.addAccount(new Account(person, 0))
         logger.debug("New account created - " + person)
