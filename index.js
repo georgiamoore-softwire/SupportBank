@@ -34,7 +34,8 @@ function consoleInterface () {
         consoleInterface()
     } else if (response === '3') {
         let file = readlineSync.question('Please enter the name of the file. ').toString();
-        importer.importFile(file).then(() =>  console.log("File imported successfully.\n"));
+        importer.importFiles([file]).then(() => logger.debug("File import finished."))
+        console.log("File imported successfully.\n")
         logger.debug("Transaction file "+file+" imported successfully.")
         consoleInterface()
     } else if (response.toLowerCase() === 'q') {
@@ -46,4 +47,4 @@ function consoleInterface () {
 }
 
 logger.debug("Program started.");
-importer.readTransactions(['Transactions2014.csv']).then(() => consoleInterface());
+importer.importFiles(['Transactions2013.json']).then(() => consoleInterface());
